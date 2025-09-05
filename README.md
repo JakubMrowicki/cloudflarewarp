@@ -15,9 +15,9 @@ This plugin solves this issue by overwriting the `X-Real-IP` and `X-Forwarded-Fo
 
 ### Configuration Options
 
-| Setting         | Allowed values | Default | Description                                                                 |
-| :-------------- | :------------- | :------ | :-------------------------------------------------------------------------- |
-| `trustip`       | `[]string`     | `[]`    | A list of custom IP addresses or CIDR ranges to trust.                      |
+| Setting           | Allowed values | Default | Description                                                                   |
+| :---------------- | :------------- | :------ | :---------------------------------------------------------------------------- |
+| `trustip`         | `[]string`     | `[]`    | A list of custom IP addresses or CIDR ranges to trust.                        |
 | `refreshInterval` | `string`       | `24h`   | The interval at which to refresh the Cloudflare IP list (e.g., `12h`, `30m`). |
 
 ### Enable the Plugin
@@ -26,8 +26,8 @@ This plugin solves this issue by overwriting the `X-Real-IP` and `X-Forwarded-Fo
 experimental:
   plugins:
     cloudflarewarp:
-      moduleName: github.com/fma965/cloudflarewarp
-      version: v1.4.0 # Or the latest version
+      moduleName: github.com/jakubmrowicki/cloudflarewarp
+      version: v1.0.0 # Or the latest version
 ```
 
 ### Plugin Configuration Example
