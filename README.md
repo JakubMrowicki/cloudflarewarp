@@ -1,44 +1,38 @@
 # Real IP from Cloudflare Proxy/Tunnel with LAN Whitelist
 
-Forked From https://github.com/BetterCorp/cloudflarewarp
-
-NOTE: This fork will force "403 error Not Cloudflare or TrustedIP" if not cloudflare or TrustIP unlike original code
+This is a fork of `github.com/fma965/cloudflarewarp`, which was originally based on `github.com/BetterCorp/cloudflarewarp`. This version has been significantly enhanced to dynamically fetch and update Cloudflare's IP ranges from the official Cloudflare API. This ensures the plugin always uses the most current IP list, improving reliability and security.
 
 If Traefik is behind a Cloudflare Proxy/Tunnel, it won't be able to get the real IP from the external client as well as other information.
 
-This plugin solves this issue by overwriting the X-Real-IP and X-Forwarded-For with an IP from the Cf-Connecting-Ip header.  
-The real IP will be the Cf-Connecting-Ip if request is come from cloudflare ( truest ip in configuration file).  
-The plugin also writes the Cf-Visitor scheme to the X-Forwarded-Proto. (This fixes an infinite redirect issue for wordpress when using CF[443]->PROXY/TUNNEL->Traefik[80]->WP[80])
+This plugin solves this issue by overwriting the `X-Real-IP` and `X-Forwarded-For` headers with an IP from the `Cf-Connecting-Ip` header for requests coming from Cloudflare. The plugin also writes the `Cf-Visitor` scheme to the `X-Forwarded-Proto` header, which can fix infinite redirect issues with applications like WordPress.
+
+## Key Improvements in this Fork
+
+- **Dynamic Cloudflare IP Ranges:** Instead of relying on a static, hardcoded list of Cloudflare IPs, this version fetches the latest IP ranges directly from the Cloudflare API.
+- **Automatic Updates:** The IP list is automatically refreshed at a configurable interval, ensuring that changes to Cloudflare's infrastructure are picked up without manual intervention.
 
 ## Configuration
 
-### Configuration documentation
+### Configuration Options
 
-Supported configurations per body
+| Setting         | Allowed values | Default | Description                                                                 |
+| :-------------- | :------------- | :------ | :-------------------------------------------------------------------------- |
+| `trustip`       | `[]string`     | `[]`    | A list of custom IP addresses or CIDR ranges to trust.                      |
+| `refreshInterval` | `string`       | `24h`   | The interval at which to refresh the Cloudflare IP list (e.g., `12h`, `30m`). |
 
-| Setting        | Allowed values | Required | Description                                         |
-| :------------- | :------------- | :------- | :-------------------------------------------------- |
-| trustip        | []string       | No       | IP or IP range(s) to trust                          |
-| disableDefault | bool           | Yes      | Disable the built in list of CloudFlare IPs/Servers |
-
-### Notes re CloudFlare
-
-One thing included in this plugin is we bundle the CloudFlare server IPs with it, so you do not have to define them manually.  
-However on the flip-side, if you want to, you can just disable them by setting `disableDefault` to `true`.
-
-If you do not define `trustip` and `disableDefault`, it doesn't seem to load the plugin, so just set `disableDefault` to `false` and you are able to use the default IP list.
-
-### Enable the plugin
+### Enable the Plugin
 
 ```yaml
 experimental:
   plugins:
     cloudflarewarp:
       moduleName: github.com/fma965/cloudflarewarp
-      version: v1.4.0
+      version: v1.4.0 # Or the latest version
 ```
 
-### Plugin configuration
+### Plugin Configuration Example
+
+Here is an example of how to configure the plugin to trust your local network and automatically use the latest Cloudflare IPs.
 
 ```yaml
 http:
@@ -46,8 +40,8 @@ http:
     cloudflarewarp:
       plugin:
         cloudflarewarp:
-          disableDefault: false
-          trustip: # Trust IPS not required if disableDefault is false - we will allocate Cloud Flare IPs automatically, can be used to add additional CIDR's like LAN networks
+          refreshInterval: 12h
+          trustip:
             - 10.0.0.0/8
             - 172.16.0.0/12
             - 192.168.0.0/16

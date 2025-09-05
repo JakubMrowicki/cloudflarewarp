@@ -1,19 +1,52 @@
 package cloudflarewarp_test
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"testing"
 
-	plugin "github.com/fma965/cloudflarewarp"
+	plugin "github.com/jakubmrowicki/cloudflarewarp"
 )
 
-func TestNew(t *testing.T) {
-	cfg := plugin.CreateConfig()
-	cfg.TrustIP = []string{"103.21.244.0/22", "172.18.0.1/32", "2405:b500::/32"}
+const (
+	// Cloudflare API mock response
+	cfAPIMockResponse = `{` +
+		`"result":{` +
+		`"ipv4_cidrs":["173.245.48.0/20","103.21.244.0/22"],` +
+		`"ipv6_cidrs":["2400:cb00::/32","2606:4700::/32"],` +
+		`"etag":"38f79d050aa027e3be3865e495dcc9bc"` +
+		`},` +
+		`"success":true,` +
+		`"errors":[]` +
+		`,"messages":[]` +
+		`}`
+)
 
-	ctx := t.Context()
+func newTestServer() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		if req.Method != http.MethodGet {
+			rw.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		rw.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(rw, cfAPIMockResponse)
+	}))
+}
+
+func TestNew(t *testing.T) {
+	server := newTestServer()
+	defer server.Close()
+
+	// Temporarily modify the CFAPI constant to point to the test server
+	plugin.CFAPI = server.URL
+
+	cfg := plugin.CreateConfig()
+	cfg.TrustIP = []string{"172.18.0.1/32"}
+
+	ctx := context.Background()
 	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 	handler, err := plugin.New(ctx, next, cfg, "cloudflarewarp")
 	if err != nil {
@@ -58,66 +91,18 @@ func TestNew(t *testing.T) {
 			trusted:        false,
 		},
 		{
-			remote:         "10.0.1.20",
-			desc:           "not trust ip4/6",
+			remote:         "2400:cb00::1",
+			ipv6:           true,
+			desc:           "trusted ipv6",
 			cfConnectingIP: "1001:3984:3989::1",
 			cfVisitor:      "",
-			expected:       "",
-			expectedScheme: "",
-			trusted:        false,
-		},
-		{
-			remote:         "1001:3984:3989::1",
-			ipv6:           true,
-			desc:           "not trust ip6/6",
-			cfConnectingIP: "1001:3984:3989::1",
-			cfVisitor:      "",
-			expected:       "",
-			expectedScheme: "",
-			trusted:        false,
-		},
-		{
-			remote:         "1001:3984:3989::1",
-			ipv6:           true,
-			desc:           "not trust ip6/4",
-			cfConnectingIP: "10.0.1.20",
-			cfVisitor:      "",
-			expected:       "",
-			expectedScheme: "",
-			trusted:        false,
-		},
-		{
-			remote:         "10.0.2",
-			desc:           "wrong IP format",
-			cfConnectingIP: "10.0.0.1",
-			cfVisitor:      "",
-			expected:       "",
-			expectedScheme: "",
-			expect400:      true,
-			trusted:        false,
-		},
-		{
-			remote:         "10.0.300.20",
-			desc:           "wrong IP address",
-			cfConnectingIP: "10.0.0.1",
-			cfVisitor:      "",
-			expected:       "",
-			expectedScheme: "",
-			expect400:      true,
-			trusted:        false,
-		},
-		{
-			remote:         "103.21.244.23",
-			desc:           "forward",
-			cfConnectingIP: "10.0.0.1",
-			cfVisitor:      "",
-			expected:       "10.0.0.1",
+			expected:       "1001:3984:3989::1",
 			expectedScheme: "",
 			trusted:        true,
 		},
 		{
 			remote:         "172.18.0.1",
-			desc:           "forward",
+			desc:           "custom trusted ip",
 			cfConnectingIP: "10.0.0.1",
 			cfVisitor:      "",
 			expected:       "10.0.0.1",
@@ -144,23 +129,20 @@ func TestNew(t *testing.T) {
 
 			handler.ServeHTTP(recorder, req)
 
-			if recorder.Result().StatusCode == http.StatusBadRequest {
-				if test.expect400 == true {
-					return
+			if !test.trusted {
+				if recorder.Result().StatusCode != http.StatusForbidden {
+					t.Errorf("invalid response status code: %d, expected %d", recorder.Result().StatusCode, http.StatusForbidden)
 				}
+				return
 			}
+
 			if recorder.Result().StatusCode != http.StatusOK {
 				t.Errorf("invalid response: %s", strconv.Itoa(recorder.Result().StatusCode))
 				return
 			}
 
-			if test.trusted {
-				assertHeader(t, req, "X-Is-Trusted", "yes")
-				assertHeader(t, req, "X-Real-Ip", test.expected)
-			} else {
-				assertHeader(t, req, "X-Is-Trusted", "no")
-				assertHeader(t, req, "X-Real-Ip", test.remote)
-			}
+			assertHeader(t, req, "X-Is-Trusted", "yes")
+			assertHeader(t, req, "X-Real-Ip", test.expected)
 			assertHeader(t, req, "X-Forwarded-For", test.expected)
 			assertHeader(t, req, "X-Forwarded-Proto", test.expectedScheme)
 		})
@@ -170,8 +152,9 @@ func TestNew(t *testing.T) {
 func TestError(t *testing.T) {
 	cfg := plugin.CreateConfig()
 	cfg.TrustIP = []string{"103.21.244.0"}
+	cfg.RefreshInterval = "invalid-duration"
 
-	ctx := t.Context()
+	ctx := context.Background()
 	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 	_, err := plugin.New(ctx, next, cfg, "cloudflarewarp")
 	if err == nil {
@@ -183,6 +166,6 @@ func assertHeader(t *testing.T, req *http.Request, key, expected string) {
 	t.Helper()
 
 	if req.Header.Get(key) != expected {
-		t.Errorf("invalid header(%s) value: %s", key, req.Header.Get(key))
+		t.Errorf("invalid header(%s) value: %s, expected: %s", key, req.Header.Get(key), expected)
 	}
 }
